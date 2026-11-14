@@ -5,6 +5,8 @@ import com.example.library.dto.request.BookRequest;
 import com.example.library.dto.response.BookResponse;
 import com.example.library.entity.*;
 import com.example.library.repository.*;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -214,7 +216,7 @@ public class BookService {
         );
     }
 
-    // UPLOAD BOOK COVER IMAGE
+
     @Transactional
     public BookResponse uploadBookCover(
             Long bookId, MultipartFile file) {
@@ -228,14 +230,45 @@ public class BookService {
             book.setCoverImagePath(newPath);
 
             Book saved = bookRepository.saveAndFlush(book);
+            BookResponse response = toResponse(saved);
 
-            if (oldPath != null) {
-                fileStorageService.deleteFile(oldPath);
-            }
+            TransactionSynchronizationManager.registerSynchronization(
+                    new TransactionSynchronization() {
 
-            return toResponse(saved);
+                        @Override
+                        public void afterCommit() {
+                            if (oldPath != null) {
+                                try {
+                                    fileStorageService.deleteFile(oldPath);
+                                } catch (RuntimeException e) {
+                                    // The database has already committed.
+                                    // Log cleanup failures without failing the request.
+                                    org.slf4j.LoggerFactory
+                                            .getLogger(BookService.class)
+                                            .warn("Could not delete old cover: {}", oldPath, e);
+                                }
+                            }
+                        }
+
+                        @Override
+                        public void afterCompletion(int status) {
+                            if (status != STATUS_COMMITTED) {
+                                try {
+                                    fileStorageService.deleteFile(newPath);
+                                } catch (RuntimeException e) {
+                                    org.slf4j.LoggerFactory
+                                            .getLogger(BookService.class)
+                                            .warn("Could not clean up new cover: {}", newPath, e);
+                                }
+                            }
+                        }
+                    }
+            );
+
+            return response;
 
         } catch (RuntimeException e) {
+            // Handles failures before synchronization is registered.
             fileStorageService.deleteFile(newPath);
             throw e;
         }
