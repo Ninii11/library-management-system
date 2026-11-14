@@ -7,7 +7,7 @@ import java.util.Set;
 public record BookRequest(
         @NotBlank String title,
         @NotNull @Positive Double price,
-        @NotNull Long authorId,
-        @NotEmpty Set<Long> categoryIds,
-        Long publisherId
+        @NotNull @Positive Long authorId,
+        @NotEmpty Set<@NotNull @Positive Long> categoryIds,
+        @Positive Long publisherId
 ) {}
